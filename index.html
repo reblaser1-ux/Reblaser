@@ -44,6 +44,24 @@
   .row > *{flex:1;min-width:120px;}
   .status{font-size:.8rem;color:var(--muted);margin-top:10px;min-height:1em;}
   hr{border:none;border-top:1px solid var(--line);margin:26px 0;}
+  .card img{cursor:pointer;}
+  .thumbs{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
+  .thumbs img{width:36px;height:36px;object-fit:cover;border:1px solid var(--line);}
+  .admin-thumb{position:relative;display:inline-block;}
+  .admin-thumb button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--danger);color:#fff;border:none;font-size:.7rem;line-height:1;cursor:pointer;}
+  #detailOverlay{display:none;position:fixed;inset:0;background:rgba(20,18,14,.85);z-index:100;align-items:center;justify-content:center;padding:20px;}
+  #detailOverlay.open{display:flex;}
+  #detailBox{background:var(--card);max-width:700px;width:100%;max-height:90vh;overflow:auto;position:relative;}
+  #detailClose{position:absolute;top:10px;left:10px;background:var(--card);border:1px solid var(--line);width:32px;height:32px;cursor:pointer;font-size:1rem;z-index:2;}
+  #detailGallery{position:relative;background:#f0ede6;}
+  #detailGallery img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;}
+  .gnav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.85);border:none;width:36px;height:36px;cursor:pointer;font-size:1.1rem;}
+  .gnav.prev{right:10px;} .gnav.next{left:10px;}
+  #detailDots{display:flex;gap:6px;justify-content:center;padding:10px;}
+  #detailDots span{width:7px;height:7px;border-radius:50%;background:var(--line);cursor:pointer;}
+  #detailDots span.active{background:var(--ink);}
+  #detailBody{padding:26px;text-align:center;}
+  #detailBody h2{font-size:1.6rem;margin:0 0 8px;}
 </style>
 </head>
 <body>
@@ -54,6 +72,24 @@
 <div class="wrap">
   <div id="grid" class="grid"></div>
   <div id="emptyMsg" class="empty" style="display:none;">עדיין אין מוצרים להצגה.</div>
+</div>
+
+<div id="detailOverlay">
+  <div id="detailBox">
+    <button id="detailClose">✕</button>
+    <div id="detailGallery">
+      <img id="detailImg" src="" alt="">
+      <button class="gnav prev" id="galPrev">›</button>
+      <button class="gnav next" id="galNext">‹</button>
+    </div>
+    <div id="detailDots"></div>
+    <div id="detailBody">
+      <h2 id="detailName"></h2>
+      <div class="price" id="detailPrice"></div>
+      <p class="desc" id="detailDesc"></p>
+      <a class="btn btn-gold" id="detailOrder" target="_blank">הזמנה בוואטסאפ</a>
+    </div>
+  </div>
 </div>
 
 <button id="admin-toggle">כניסת מנהל/ת</button>
@@ -82,7 +118,8 @@
       <div class="field"><label>מחיר (₪)</label><input id="p-price" type="number"></div>
     </div>
     <div class="field"><label>תיאור</label><textarea id="p-desc"></textarea></div>
-    <div class="field"><label>תמונה</label><input id="p-image" type="file" accept="image/*"></div>
+    <div class="field"><label>תמונות (אפשר לבחור כמה יחד)</label><input id="p-image" type="file" accept="image/*" multiple></div>
+    <div id="existingImages" class="thumbs"></div>
     <div class="row">
       <button class="btn btn-gold" id="saveProduct">הוסף מוצר</button>
       <button class="btn" id="cancelEdit" style="display:none;">ביטול עריכה</button>
@@ -128,20 +165,61 @@ function renderPublic(){
 
   products.forEach(p=>{
     const card = document.createElement('div'); card.className='card';
+    const thumb = (p.images && p.images[0]) || p.image_url || '';
     const waText = encodeURIComponent('שלום! מעוניין/ת להזמין: ' + p.name + (p.price? (' (' + p.price + ' ₪)') : ''));
     const waLink = settings.whatsapp ? ('https://wa.me/' + settings.whatsapp + '?text=' + waText) : '#';
     card.innerHTML = `
       ${p.in_stock===false?'<span class="oos">אזל מהמלאי</span>':''}
-      <img src="${p.image_url||''}" alt="${p.name}">
+      <img src="${thumb}" alt="${p.name}" data-open="${p.id}">
       <div class="body">
-        <h3>${p.name}</h3>
+        <h3 data-open="${p.id}" style="cursor:pointer;">${p.name}</h3>
         ${p.price?`<div class="price">${p.price} ₪</div>`:''}
         <div class="desc">${p.description||''}</div>
         <a class="btn btn-order" ${p.in_stock===false||!settings.whatsapp?'disabled':''} href="${waLink}" target="_blank">הזמנה בוואטסאפ</a>
       </div>`;
     grid.appendChild(card);
   });
+  grid.querySelectorAll('[data-open]').forEach(el=>el.onclick=()=>openDetail(el.dataset.open));
 }
+
+let galImages = [];
+let galIndex = 0;
+
+function openDetail(id){
+  const p = products.find(x=>x.id===id);
+  if(!p) return;
+  galImages = (p.images && p.images.length) ? p.images : (p.image_url ? [p.image_url] : []);
+  galIndex = 0;
+  document.getElementById('detailName').textContent = p.name;
+  document.getElementById('detailPrice').textContent = p.price ? (p.price + ' ₪') : '';
+  document.getElementById('detailDesc').textContent = p.description || '';
+  const waText = encodeURIComponent('שלום! מעוניין/ת להזמין: ' + p.name + (p.price? (' (' + p.price + ' ₪)') : ''));
+  const order = document.getElementById('detailOrder');
+  if (settings.whatsapp && p.in_stock !== false){
+    order.href = 'https://wa.me/' + settings.whatsapp + '?text=' + waText;
+    order.style.display = 'inline-block';
+  } else { order.style.display = 'none'; }
+  renderGallery();
+  document.getElementById('detailOverlay').classList.add('open');
+}
+function renderGallery(){
+  const dots = document.getElementById('detailDots');
+  document.getElementById('detailImg').src = galImages[galIndex] || '';
+  dots.innerHTML = '';
+  const nav = galImages.length > 1;
+  document.getElementById('galPrev').style.display = nav ? 'block':'none';
+  document.getElementById('galNext').style.display = nav ? 'block':'none';
+  galImages.forEach((_,i)=>{
+    const d = document.createElement('span');
+    if (i===galIndex) d.className='active';
+    d.onclick = ()=>{ galIndex=i; renderGallery(); };
+    dots.appendChild(d);
+  });
+}
+document.getElementById('galPrev').onclick = ()=>{ galIndex = (galIndex+1) % galImages.length; renderGallery(); };
+document.getElementById('galNext').onclick = ()=>{ galIndex = (galIndex-1+galImages.length) % galImages.length; renderGallery(); };
+document.getElementById('detailClose').onclick = ()=> document.getElementById('detailOverlay').classList.remove('open');
+document.getElementById('detailOverlay').onclick = (e)=>{ if(e.target.id==='detailOverlay') e.currentTarget.classList.remove('open'); };
 
 function renderAdmin(){
   document.getElementById('in-siteName').value = settings.site_name||'';
@@ -151,7 +229,7 @@ function renderAdmin(){
   list.innerHTML = '';
   products.forEach(p=>{
     const row = document.createElement('div'); row.className='admin-item';
-    row.innerHTML = `<img src="${p.image_url||''}"><div class="name">${p.name} ${p.price?('· '+p.price+' ₪'):''}</div>
+    row.innerHTML = `<img src="${(p.images&&p.images[0])||p.image_url||''}"><div class="name">${p.name} ${p.price?('· '+p.price+' ₪'):''}</div>
       <button class="btn" data-edit="${p.id}">ערוך</button>
       <button class="btn" data-toggle="${p.id}">${p.in_stock===false?'סמן במלאי':'סמן אזל'}</button>
       <button class="btn btn-danger" data-del="${p.id}">מחק</button>`;
@@ -162,6 +240,8 @@ function renderAdmin(){
   list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.del));
 }
 
+let currentEditImages = [];
+
 function startEdit(id){
   const p = products.find(x=>x.id===id);
   if(!p) return;
@@ -170,12 +250,29 @@ function startEdit(id){
   document.getElementById('p-price').value = p.price||'';
   document.getElementById('p-desc').value = p.description||'';
   document.getElementById('p-image').value = '';
+  currentEditImages = (p.images && p.images.length) ? [...p.images] : (p.image_url ? [p.image_url] : []);
+  renderExistingImages();
   document.getElementById('formTitle').textContent = 'עריכת מוצר';
   document.getElementById('saveProduct').textContent = 'עדכן מוצר';
   document.getElementById('cancelEdit').style.display = 'inline-block';
 }
+function renderExistingImages(){
+  const box = document.getElementById('existingImages');
+  box.innerHTML = '';
+  currentEditImages.forEach((url,i)=>{
+    const wrap = document.createElement('span'); wrap.className='admin-thumb';
+    wrap.innerHTML = `<img src="${url}"><button data-rm="${i}">✕</button>`;
+    box.appendChild(wrap);
+  });
+  box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{
+    currentEditImages.splice(Number(b.dataset.rm),1);
+    renderExistingImages();
+  });
+}
 function resetForm(){
   editingId = null;
+  currentEditImages = [];
+  document.getElementById('existingImages').innerHTML = '';
   document.getElementById('p-name').value='';
   document.getElementById('p-price').value='';
   document.getElementById('p-desc').value='';
@@ -188,11 +285,16 @@ document.getElementById('cancelEdit').onclick = resetForm;
 
 async function uploadImage(file){
   const ext = file.name.split('.').pop();
-  const path = `${Date.now()}.${ext}`;
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
   const { error } = await supabase.storage.from('product-images').upload(path, file);
   if (error) throw error;
   const { data } = supabase.storage.from('product-images').getPublicUrl(path);
   return data.publicUrl;
+}
+async function uploadImages(files){
+  const urls = [];
+  for (const file of files) urls.push(await uploadImage(file));
+  return urls;
 }
 
 document.getElementById('saveProduct').onclick = async ()=>{
@@ -200,20 +302,22 @@ document.getElementById('saveProduct').onclick = async ()=>{
   const name = document.getElementById('p-name').value.trim();
   const price = document.getElementById('p-price').value.trim() || null;
   const description = document.getElementById('p-desc').value.trim();
-  const file = document.getElementById('p-image').files[0];
+  const files = document.getElementById('p-image').files;
   if(!name){ s.textContent = 'יש להזין שם מוצר'; return; }
   s.textContent = 'שומר...';
   try{
-    let image_url;
-    if(file) image_url = await uploadImage(file);
+    let newUrls = [];
+    if(files.length) newUrls = await uploadImages(files);
     if(editingId){
-      const patch = { name, price, description };
-      if(image_url) patch.image_url = image_url;
+      const images = [...currentEditImages, ...newUrls];
+      const patch = { name, price, description, images };
+      if(images[0]) patch.image_url = images[0];
       const { error } = await supabase.from('products').update(patch).eq('id', editingId);
       if (error) throw error;
       s.textContent = 'המוצר עודכן ✓';
     } else {
-      const { error } = await supabase.from('products').insert({ name, price, description, image_url: image_url||null, in_stock:true });
+      const images = newUrls;
+      const { error } = await supabase.from('products').insert({ name, price, description, images, image_url: images[0]||null, in_stock:true });
       if (error) throw error;
       s.textContent = 'המוצר נוסף ✓';
     }
